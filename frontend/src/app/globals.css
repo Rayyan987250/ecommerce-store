@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes ui-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes ui-soft-shimmer {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+.ui-fade-up {
+  animation: ui-fade-up 520ms ease-out both;
+}
+
+.ui-surface {
+  position: relative;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.ui-surface:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.08);
+}
+
+.ui-button-pop {
+  position: relative;
+  overflow: hidden;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.ui-button-pop:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.10);
+}
+
+.ui-button-pop:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ui-button-pop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgba(255, 255, 255, 0.28) 50%, transparent 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ui-button-pop:hover::after {
+  opacity: 1;
+  animation: ui-soft-shimmer 700ms ease;
+}
+
+.ui-focus-field {
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.ui-link-motion {
+  transition:
+    color 150ms ease,
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+
+.ui-link-motion:hover {
+  transform: translateY(-1px);
+}
+
+@keyframes auth-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.auth-card,
+.auth-fade-up {
+  animation: auth-fade-up 700ms ease-out both;
+}
+
+.auth-minimal {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top, rgba(18, 127, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, #f7fafc 0%, #f2f6fa 100%);
+}
+
+.auth-minimal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.6) 1px, transparent 1px);
+  background-size: 30px 30px;
+  -webkit-mask-image: radial-gradient(circle at center, black, transparent 78%);
+  mask-image: radial-gradient(circle at center, black, transparent 78%);
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+.auth-brand {
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.auth-brand:hover {
+  transform: translateY(-1px);
+  opacity: 0.96;
+}
