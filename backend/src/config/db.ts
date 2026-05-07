@@ -2,13 +2,17 @@ import "dotenv/config";
 import bcrypt from "bcryptjs";
 import postgres from "postgres";
 
-const databaseUrl =
-  process.env.NEON_DATABASE_URL ||
-  process.env.DATABASE_URL ||
-  (process.env.NODE_ENV === "test" ? "postgresql://test:test@localhost:5432/test?sslmode=disable" : undefined);
-if (!databaseUrl) {
-  throw new Error("NEON_DATABASE_URL is required");
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required in backend/.env`);
+  }
+  return value;
 }
+
+const neonDatabaseUrl = requireEnv("NEON_DATABASE_URL");
+const fallbackDatabaseUrl = requireEnv("DATABASE_URL");
+const databaseUrl = neonDatabaseUrl || fallbackDatabaseUrl;
 
 export const sql = postgres(databaseUrl, {
   ssl: "require",
@@ -491,8 +495,11 @@ export async function initializeSchemaAndSeed() {
   await sql`CREATE INDEX IF NOT EXISTS idx_products_price ON products(price)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_products_rating ON products(rating DESC)`;
 
-  const adminEmail = process.env.SEED_ADMIN_EMAIL || "admin@demo.com";
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD || "Admin@12345";
+  const adminEmail = requireEnv("SEED_ADMIN_EMAIL");
+  const adminPassword = requireEnv("SEED_ADMIN_PASSWORD");
+  if (adminPassword === "Admin@12345") {
+    throw new Error("SEED_ADMIN_PASSWORD must not use the insecure default value");
+  }
   const hashedPassword = await bcrypt.hash(adminPassword, 10);
   await sql`
     INSERT INTO users (name, email, password_hash, is_admin)
