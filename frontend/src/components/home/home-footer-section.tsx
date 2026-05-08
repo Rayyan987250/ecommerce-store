@@ -41,7 +41,7 @@ const footerColumns = [
       { label: "Login", href: "/login" },
       { label: "Register", href: "/signup" },
       { label: "Settings", href: "/" },
-      { label: "My Orders", href: "/cart" },
+      { label: "My Orders", href: "/account" },
     ],
   },
 ];

@@ -2,6 +2,7 @@ import { apiRequest } from "@/services/http";
 import type { Product, ProductListResult, ProductQueryParams } from "@/types";
 
 type ProductsResponse = ProductListResult;
+type ProductMutationInput = Omit<Product, "id">;
 
 export async function getProducts(params: ProductQueryParams = {}): Promise<ProductListResult> {
   const searchParams = new URLSearchParams();
@@ -36,4 +37,26 @@ export async function getRecommendedProducts(productId?: string) {
   const search = productId ? `?excludeId=${encodeURIComponent(productId)}` : "";
   const response = await apiRequest<Product[]>(`/products/recommended/list${search}`);
   return response.data ?? [];
+}
+
+export async function createProduct(payload: ProductMutationInput) {
+  const response = await apiRequest<Product>("/products", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return response.data as Product;
+}
+
+export async function updateProduct(id: string, payload: Partial<ProductMutationInput>) {
+  const response = await apiRequest<Product>(`/products/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  return response.data as Product;
+}
+
+export async function deleteProduct(id: string) {
+  return apiRequest<{ message: string }>(`/products/${id}`, {
+    method: "DELETE",
+  });
 }

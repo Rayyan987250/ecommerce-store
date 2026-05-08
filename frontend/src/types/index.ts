@@ -1,5 +1,12 @@
 export type ProductCondition = "new" | "refurbished" | "used";
 
+export type AuthUser = {
+  _id: string;
+  name: string;
+  email: string;
+  isAdmin: boolean;
+};
+
 export type Product = {
   id: string;
   title: string;
@@ -57,9 +64,62 @@ export type CartLineItem = {
   qty: number;
 };
 
+export type CartServerItem = {
+  productId: string;
+  title: string;
+  image: string;
+  price: number;
+  qty: number;
+  lineTotal: number;
+};
+
 export type SavedProduct = {
   id: string;
   title: string;
   image: string;
   price: number;
+};
+
+export type CartServerState = {
+  items: CartServerItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  itemCount: number;
+};
+
+export type CartMutationItem = {
+  productId: string;
+  qty: number;
+};
+
+export type OrderItem = {
+  productId?: string;
+  title: string;
+  image: string;
+  price: number;
+  qty: number;
+  lineTotal: number;
+};
+
+export type Order = {
+  id: string;
+  status: string;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  itemCount: number;
+  couponCode?: string;
+  createdAt: string;
+  items: OrderItem[];
+};
+
+export type SystemStatus = {
+  database: "connected";
+  databaseTime: string | null;
+  users: number;
+  products: number;
+  carts: number;
+  orders: number;
 };

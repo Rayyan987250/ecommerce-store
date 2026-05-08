@@ -7,10 +7,22 @@ import { Button } from "@/components/ui/button";
 import { useLoginMutation } from "@/services/queries/auth";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect } from "react";
 
-export default function LoginPage() {
+function LoginPageContent() {
   const mutation = useLoginMutation();
   const form = useAuthForm("login");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const user = mutation.data?.data;
+    if (!user) return;
+
+    const nextPath = searchParams.get("next");
+    router.replace(nextPath || "/");
+  }, [mutation.data, router, searchParams]);
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -88,5 +100,13 @@ export default function LoginPage() {
         ) : null}
       </form>
     </AuthShell>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f7fafc]" />}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

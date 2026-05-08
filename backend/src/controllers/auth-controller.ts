@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
+import { createHash, randomBytes } from "node:crypto";
 import { sql } from "../config/db.js";
 import {
   clearAuthCookies,
@@ -16,6 +17,17 @@ function issueSessionCookies(res: Response, userId: string) {
   const csrfToken = generateCsrfToken();
   setAuthCookies(res, accessToken, refreshToken, csrfToken);
   return csrfToken;
+}
+
+function hashResetToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function getPrimaryFrontendUrl() {
+  return (process.env.FRONTEND_URL || "http://localhost:3000")
+    .split(",")
+    .map((url) => url.trim())
+    .find(Boolean) || "http://localhost:3000";
 }
 
 export async function register(req: Request, res: Response, next: NextFunction) {
@@ -178,6 +190,96 @@ export async function refreshSession(req: Request, res: Response, next: NextFunc
         isAdmin: user.is_admin,
       },
       csrfToken,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function requestPasswordReset(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { email } = req.body as { email: string };
+    const users = await sql<{ id: string }[]>`
+      SELECT id::text AS id
+      FROM users
+      WHERE email = ${email}
+      LIMIT 1
+    `;
+    const user = users[0];
+    let resetUrl: string | undefined;
+
+    if (user) {
+      const token = randomBytes(32).toString("hex");
+      const tokenHash = hashResetToken(token);
+
+      await sql.begin(async (tx) => {
+        await tx`DELETE FROM password_reset_tokens WHERE user_id = ${user.id}::bigint`;
+        await tx`
+          INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+          VALUES (${user.id}::bigint, ${tokenHash}, NOW() + INTERVAL '30 minutes')
+        `;
+      });
+
+      const frontendUrl = getPrimaryFrontendUrl().replace(/\/$/, "");
+      resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "If an account exists for that email, a reset link has been generated.",
+      ...(resetUrl ? { data: { resetUrl } } : {}),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function confirmPasswordReset(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { token, password } = req.body as { token: string; password: string };
+    const tokenHash = hashResetToken(token);
+    const rows = await sql<{ id: string; user_id: string }[]>`
+      SELECT id::text AS id, user_id::text AS user_id
+      FROM password_reset_tokens
+      WHERE token_hash = ${tokenHash}
+      AND consumed_at IS NULL
+      AND expires_at > NOW()
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+    const resetToken = rows[0];
+
+    if (!resetToken) {
+      res.status(400).json({
+        success: false,
+        message: "This reset link is invalid or has expired.",
+      });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await sql.begin(async (tx) => {
+      await tx`
+        UPDATE users
+        SET password_hash = ${passwordHash}, updated_at = NOW()
+        WHERE id = ${resetToken.user_id}::bigint
+      `;
+      await tx`
+        UPDATE password_reset_tokens
+        SET consumed_at = NOW()
+        WHERE id = ${resetToken.id}::bigint
+      `;
+      await tx`
+        DELETE FROM password_reset_tokens
+        WHERE user_id = ${resetToken.user_id}::bigint
+        AND id <> ${resetToken.id}::bigint
+      `;
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successfully. You can now sign in with your new password.",
     });
   } catch (error) {
     next(error);

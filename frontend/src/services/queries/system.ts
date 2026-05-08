@@ -1,24 +1,12 @@
 "use client";
 
 import { apiRequest } from "@/services/http";
+import type { SystemStatus } from "@/types";
 import { useQuery } from "@tanstack/react-query";
 
-type SystemStatusResponse = {
-  status: "ok";
-  message: string;
-  data: {
-    database: "connected";
-    databaseTime: string | null;
-    users: number;
-    products: number;
-  };
-  requestId?: string;
-  timestamp: string;
-};
-
 async function getSystemStatus() {
-  const response = await apiRequest<SystemStatusResponse>("/system/status");
-  return response;
+  const response = await apiRequest<SystemStatus>("/system/status");
+  return response.data as SystemStatus;
 }
 
 export function useSystemStatusQuery() {

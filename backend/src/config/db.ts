@@ -2,17 +2,24 @@ import "dotenv/config";
 import bcrypt from "bcryptjs";
 import postgres from "postgres";
 
-function requireEnv(name: string): string {
+function getEnv(name: string): string | undefined {
   const value = process.env[name]?.trim();
+  return value ? value : undefined;
+}
+
+function requireEnv(name: string): string {
+  const value = getEnv(name);
   if (!value) {
     throw new Error(`${name} is required in backend/.env`);
   }
   return value;
 }
 
-const neonDatabaseUrl = requireEnv("NEON_DATABASE_URL");
-const fallbackDatabaseUrl = requireEnv("DATABASE_URL");
-const databaseUrl = neonDatabaseUrl || fallbackDatabaseUrl;
+const databaseUrl = getEnv("NEON_DATABASE_URL") || getEnv("DATABASE_URL");
+
+if (!databaseUrl) {
+  throw new Error("NEON_DATABASE_URL or DATABASE_URL is required in backend/.env");
+}
 
 export const sql = postgres(databaseUrl, {
   ssl: "require",
@@ -490,10 +497,77 @@ export async function initializeSchemaAndSeed() {
     )
   `;
 
+  await sql`
+    CREATE TABLE IF NOT EXISTS carts (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS cart_items (
+      cart_id BIGINT NOT NULL REFERENCES carts(id) ON DELETE CASCADE,
+      product_id BIGINT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (cart_id, product_id)
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS orders (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'placed',
+      subtotal NUMERIC(12,2) NOT NULL,
+      discount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      tax NUMERIC(12,2) NOT NULL DEFAULT 0,
+      total NUMERIC(12,2) NOT NULL,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      coupon_code TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id BIGSERIAL PRIMARY KEY,
+      order_id BIGINT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+      product_id BIGINT REFERENCES products(id) ON DELETE SET NULL,
+      title_snapshot TEXT NOT NULL,
+      image_snapshot TEXT NOT NULL,
+      unit_price NUMERIC(12,2) NOT NULL,
+      quantity INTEGER NOT NULL CHECK (quantity > 0),
+      line_total NUMERIC(12,2) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
   await sql`CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_products_price ON products(price)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_products_rating ON products(rating DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_cart_items_product_id ON cart_items(product_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at)`;
 
   const adminEmail = requireEnv("SEED_ADMIN_EMAIL");
   const adminPassword = requireEnv("SEED_ADMIN_PASSWORD");
@@ -504,11 +578,12 @@ export async function initializeSchemaAndSeed() {
   await sql`
     INSERT INTO users (name, email, password_hash, is_admin)
     VALUES ('Demo Admin', ${adminEmail}, ${hashedPassword}, TRUE)
-    ON CONFLICT (email) DO NOTHING
+    ON CONFLICT (email) DO UPDATE SET
+      name = EXCLUDED.name,
+      password_hash = EXCLUDED.password_hash,
+      is_admin = TRUE,
+      updated_at = NOW()
   `;
-
-  const seedSlugs = seedProducts.map((product) => product.slug);
-  await sql`DELETE FROM products WHERE slug NOT IN ${sql(seedSlugs)}`;
 
   for (const product of seedProducts) {
     await sql`

@@ -2,8 +2,9 @@
 "use client";
 
 import SearchBar from "@/components/shared/search-bar";
+import { useLogoutMutation, useSessionQuery } from "@/services/queries/auth";
 import { useCartStore } from "@/store/use-cart-store";
-import { Heart, MessageSquare, ShoppingBag, ShoppingCart, User } from "lucide-react";
+import { Heart, LogOut, MessageSquare, ShieldCheck, ShoppingBag, ShoppingCart, User } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 
@@ -23,6 +24,14 @@ const HeartIcon = () => (
 
 const CartIcon = () => (
   <ShoppingCart className="h-5 w-5" strokeWidth={1.8} />
+);
+
+const AdminIcon = () => (
+  <ShieldCheck className="h-5 w-5" strokeWidth={1.8} />
+);
+
+const LogoutIcon = () => (
+  <LogOut className="h-5 w-5" strokeWidth={1.8} />
 );
 
 const BagLogo = () => (
@@ -71,10 +80,13 @@ function useCartHydrated() {
 
 export default function Header() {
   const hydrated = useCartHydrated();
+  const sessionQuery = useSessionQuery();
+  const logoutMutation = useLogoutMutation();
   const cartCount = useCartStore((state) => state.items.reduce((total, item) => total + item.qty, 0));
   const savedCount = useCartStore((state) => state.saved.length);
   const badgeCartCount = hydrated ? cartCount : 0;
   const badgeSavedCount = hydrated ? savedCount : 0;
+  const user = sessionQuery.data;
 
   return (
     <header className="w-full border-b border-[#e1e1e1] bg-[#ececec] py-3 md:py-4">
@@ -94,13 +106,24 @@ export default function Header() {
 
         {/* Right actions */}
         <nav className="hidden items-center gap-2 self-end sm:flex md:gap-[14px] lg:gap-[22px]" aria-label="Quick links">
-          <ActionItem icon={<UserIcon />} label="Profile" href="/login" />
-          <ActionItem icon={<MessageIcon />} label="Message" href="/login" />
+          <ActionItem icon={<UserIcon />} label={user ? "Account" : "Profile"} href={user ? (user.isAdmin ? "/admin" : "/account") : "/login"} />
+          {user?.isAdmin ? <ActionItem icon={<AdminIcon />} label="Admin" href="/admin/products" /> : <ActionItem icon={<MessageIcon />} label="Message" href="/login" />}
           <ActionItem icon={<HeartIcon />} label="Saved" href="/cart" badge={badgeSavedCount} />
           <ActionItem icon={<CartIcon />} label="My cart" href="/cart" badge={badgeCartCount} />
+          {user ? (
+            <button
+              type="button"
+              onClick={() => logoutMutation.mutate()}
+              className="ui-link-motion inline-flex items-center gap-2 rounded-md px-2 py-1 text-[13px] font-semibold text-[#505050] transition hover:bg-[#f1f4f9] hover:text-[#0d6efd]"
+            >
+              <LogoutIcon />
+              {logoutMutation.isPending ? "Signing out..." : "Logout"}
+            </button>
+          ) : null}
         </nav>
         <nav className="flex items-center gap-2 self-end sm:hidden" aria-label="Mobile quick links">
-          <ActionItem icon={<UserIcon />} label="Profile" href="/login" />
+          <ActionItem icon={<UserIcon />} label={user ? "Account" : "Profile"} href={user ? (user.isAdmin ? "/admin" : "/account") : "/login"} />
+          {user?.isAdmin ? <ActionItem icon={<AdminIcon />} label="Admin" href="/admin" /> : null}
           <ActionItem icon={<HeartIcon />} label="Saved" href="/cart" badge={badgeSavedCount} />
           <ActionItem icon={<CartIcon />} label="Cart" href="/cart" badge={badgeCartCount} />
         </nav>

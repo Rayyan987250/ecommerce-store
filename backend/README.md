@@ -8,9 +8,11 @@ Express + TypeScript backend using Neon PostgreSQL.
 ```bash
 npm install
 ```
-2. Set only this required variable in `backend/.env`:
+2. Set the required variables in `backend/.env`:
 ```bash
 NEON_DATABASE_URL=postgresql://<user>:<password>@<host>/<db>?sslmode=require
+SEED_ADMIN_EMAIL=admin@example.com
+SEED_ADMIN_PASSWORD=ChooseAStrongPassword
 ```
 3. Start server:
 ```bash
@@ -36,8 +38,8 @@ On startup, the app automatically:
 | `JWT_REFRESH_SECRET` | No | Refresh token secret |
 | `JWT_ACCESS_EXPIRE` | No | Access token expiry (`15m`) |
 | `JWT_REFRESH_EXPIRE` | No | Refresh token expiry (`7d`) |
-| `SEED_ADMIN_EMAIL` | No | Initial admin email |
-| `SEED_ADMIN_PASSWORD` | No | Initial admin password |
+| `SEED_ADMIN_EMAIL` | Yes | Initial admin email used for seeded admin login |
+| `SEED_ADMIN_PASSWORD` | Yes | Initial admin password used for seeded admin login |
 
 ## Available endpoints
 
@@ -45,6 +47,8 @@ On startup, the app automatically:
 - `GET /api/auth/csrf-token`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
+- `POST /api/auth/reset-password/request`
+- `POST /api/auth/reset-password/confirm`
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
 - `GET /api/auth/profile`

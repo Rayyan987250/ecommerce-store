@@ -3,10 +3,12 @@
 import CartItem from "@/components/cart/cart-item";
 import HomeFooterSection from "@/components/home/home-footer-section";
 import { useCurrencyPricing } from "@/hooks/use-currency-pricing";
+import { useSessionQuery } from "@/services/queries/auth";
 import { useCartStore } from "@/store/use-cart-store";
 import { ChevronLeft, Lock, MessageCircle, ShoppingCart, Truck } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 const trustBadges = [
@@ -17,6 +19,8 @@ const trustBadges = [
 
 export default function CartPage() {
   const { formatPrice } = useCurrencyPricing();
+  const router = useRouter();
+  const sessionQuery = useSessionQuery();
   const items = useCartStore((state) => state.items);
   const savedItems = useCartStore((state) => state.saved);
   const removeItem = useCartStore((state) => state.removeItem);
@@ -25,14 +29,19 @@ export default function CartPage() {
   const updateQty = useCartStore((state) => state.updateQty);
   const clearCart = useCartStore((state) => state.clearCart);
   const removeSaved = useCartStore((state) => state.removeSaved);
+  const checkout = useCartStore((state) => state.checkout);
+  const isServerSyncing = useCartStore((state) => state.isServerSyncing);
+  const lastOrder = useCartStore((state) => state.lastOrder);
+  const clearLastOrder = useCartStore((state) => state.clearLastOrder);
   const [couponDraft, setCouponDraft] = useState("");
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [couponMessage, setCouponMessage] = useState<string | null>(null);
 
   const subtotal = useMemo(() => items.reduce((total, item) => total + item.price * item.qty, 0), [items]);
   const discount = appliedCoupon === "SAVE10" ? subtotal * 0.1 : 0;
-  const tax = subtotal > 0 ? subtotal * 0.05 : 0;
-  const total = subtotal - discount + tax;
+  const taxableSubtotal = Math.max(subtotal - discount, 0);
+  const tax = taxableSubtotal > 0 ? taxableSubtotal * 0.05 : 0;
+  const total = taxableSubtotal + tax;
 
   const onApplyCoupon = () => {
     const normalizedCoupon = couponDraft.trim().toUpperCase();
@@ -44,6 +53,23 @@ export default function CartPage() {
 
     setAppliedCoupon(null);
     setCouponMessage("Invalid coupon code.");
+  };
+
+  const onCheckout = async () => {
+    if (!sessionQuery.data) {
+      setCouponMessage("Please sign in before checkout.");
+      router.push("/login?next=/cart");
+      return;
+    }
+
+    try {
+      await checkout(appliedCoupon ?? undefined);
+      setCouponMessage("Order placed successfully.");
+      setCouponDraft("");
+      setAppliedCoupon(null);
+    } catch (error) {
+      setCouponMessage(error instanceof Error ? error.message : "Checkout failed.");
+    }
   };
 
   return (
@@ -113,8 +139,13 @@ export default function CartPage() {
               <span>Total:</span>
               <span>{formatPrice(total)}</span>
             </div>
-            <button type="button" className="ui-button-pop mt-4 h-11 w-full rounded-md bg-[#00b517] text-[18px] font-semibold text-white transition hover:bg-[#00a114]">
-              Checkout
+            <button
+              type="button"
+              onClick={onCheckout}
+              disabled={items.length === 0 || isServerSyncing}
+              className="ui-button-pop mt-4 h-11 w-full rounded-md bg-[#00b517] text-[18px] font-semibold text-white transition hover:bg-[#00a114] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isServerSyncing ? "Processing..." : sessionQuery.data ? "Checkout" : "Sign in to checkout"}
             </button>
             <div className="mt-3 flex items-center gap-2 text-[12px] text-[#8b96a5]">
               <span className="rounded bg-[#f2f5f7] px-2 py-1">VISA</span>
@@ -138,6 +169,26 @@ export default function CartPage() {
           </div>
         ))}
       </div>
+
+      {lastOrder ? (
+        <section className="rounded-md border border-[#cce7d1] bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[20px] font-semibold text-[#1c1c1c]">Last order confirmed</h2>
+              <p className="mt-1 text-[14px] text-[#1e7b37]">
+                Order #{lastOrder.id} was placed for {formatPrice(lastOrder.total)}.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={clearLastOrder}
+              className="rounded-md border border-[#d9dfe7] px-3 py-2 text-[13px] font-semibold text-[#505050] hover:bg-[#f7fbff]"
+            >
+              Dismiss
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       {savedItems.length > 0 ? (
         <section className="rounded-md border border-[#e3e6eb] bg-white p-3">

@@ -1,12 +1,24 @@
 "use client";
 
-import type { CartLineItem, Product, SavedProduct } from "@/types";
+import { checkoutCart, clearServerCart, getCart, syncCart } from "@/services/cart";
+import { useAuthStore } from "@/store/use-auth-store";
+import type { CartLineItem, CartMutationItem, CartServerState, Order, Product, SavedProduct } from "@/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 type CartState = {
   items: CartLineItem[];
   saved: SavedProduct[];
+  ownerUserId: string | null;
+  subtotal: number;
+  tax: number;
+  total: number;
+  itemCount: number;
+  isServerSyncing: boolean;
+  lastOrder: Order | null;
+  setServerCart: (cart: CartServerState) => void;
+  loadServerCart: () => Promise<void>;
+  syncServerCart: () => Promise<void>;
   isSaved: (id: string) => boolean;
   addItem: (product: Product, qty?: number) => void;
   removeItem: (id: string) => void;
@@ -16,10 +28,33 @@ type CartState = {
   removeSaved: (id: string) => void;
   moveToSaved: (id: string) => void;
   moveToCart: (id: string) => void;
+  checkout: (couponCode?: string) => Promise<Order>;
+  clearLastOrder: () => void;
+  claimOwnership: (userId: string) => void;
+  resetAfterSignOut: () => void;
+  resetForUserSwitch: (userId: string) => void;
 };
 
 function toSavedProduct(product: Pick<Product, "id" | "title" | "image" | "price">): SavedProduct {
   return { id: product.id, title: product.title, image: product.image, price: product.price };
+}
+
+function toServerPayload(items: CartLineItem[]): CartMutationItem[] {
+  return items.map((item) => ({ productId: item.id, qty: item.qty }));
+}
+
+function buildLocalTotals(items: CartLineItem[]) {
+  const subtotal = Number(items.reduce((total, item) => total + item.price * item.qty, 0).toFixed(2));
+  const tax = subtotal > 0 ? Number((subtotal * 0.05).toFixed(2)) : 0;
+  const total = Number((subtotal + tax).toFixed(2));
+  const itemCount = items.reduce((count, item) => count + item.qty, 0);
+  return { subtotal, tax, total, itemCount };
+}
+
+async function pushServerCart(items: CartLineItem[]) {
+  const user = useAuthStore.getState().user;
+  if (!user) return null;
+  return syncCart(toServerPayload(items));
 }
 
 export const useCartStore = create<CartState>()(
@@ -27,64 +62,207 @@ export const useCartStore = create<CartState>()(
     (set, get) => ({
       items: [],
       saved: [],
+      ownerUserId: null,
+      subtotal: 0,
+      tax: 0,
+      total: 0,
+      itemCount: 0,
+      isServerSyncing: false,
+      lastOrder: null,
+      setServerCart: (cart) =>
+        set(() => ({
+          items: cart.items.map((item) => ({
+            id: item.productId,
+            title: item.title,
+            image: item.image,
+            price: item.price,
+            qty: item.qty,
+          })),
+          subtotal: cart.subtotal,
+          tax: cart.tax,
+          total: cart.total,
+          itemCount: cart.itemCount,
+        })),
+      loadServerCart: async () => {
+        const user = useAuthStore.getState().user;
+        if (!user) return;
+        set({ isServerSyncing: true });
+        try {
+          const cart = await getCart();
+          get().setServerCart(cart);
+          set({ ownerUserId: user._id });
+        } finally {
+          set({ isServerSyncing: false });
+        }
+      },
+      syncServerCart: async () => {
+        const user = useAuthStore.getState().user;
+        if (!user) return;
+        set({ isServerSyncing: true });
+        try {
+          const cart = await pushServerCart(get().items);
+          if (cart) {
+            get().setServerCart(cart);
+            set({ ownerUserId: user._id });
+          }
+        } finally {
+          set({ isServerSyncing: false });
+        }
+      },
       isSaved: (id) => get().saved.some((item) => item.id === id),
-      addItem: (product, qty = 1) =>
+      addItem: (product, qty = 1) => {
         set((state) => {
           const existing = state.items.find((item) => item.id === product.id);
-          if (existing) {
-            return {
-              items: state.items.map((item) =>
+          const items = existing
+            ? state.items.map((item) =>
                 item.id === product.id ? { ...item, qty: item.qty + qty } : item
-              ),
-            };
-          }
+              )
+            : [
+                ...state.items,
+                { id: product.id, title: product.title, image: product.image, price: product.price, qty },
+              ];
+
           return {
-            items: [
-              ...state.items,
-              { id: product.id, title: product.title, image: product.image, price: product.price, qty },
-            ],
+            items,
             saved: state.saved.filter((item) => item.id !== product.id),
+            ...buildLocalTotals(items),
           };
-        }),
-      removeItem: (id) => set((state) => ({ items: state.items.filter((item) => item.id !== id) })),
-      updateQty: (id, qty) =>
-        set((state) => ({
-          items: state.items.map((item) => (item.id === id ? { ...item, qty: Math.max(1, qty) } : item)),
-        })),
-      clearCart: () => set({ items: [] }),
-      saveProduct: (product) =>
+        });
+        const user = useAuthStore.getState().user;
+        if (user) {
+          get().claimOwnership(user._id);
+        }
+        void get().syncServerCart();
+      },
+      removeItem: (id) => {
+        const items = get().items.filter((item) => item.id !== id);
+        set(() => ({
+          items,
+          ...buildLocalTotals(items),
+        }));
+        void get().syncServerCart();
+      },
+      updateQty: (id, qty) => {
+        const items = get().items.map((item) => (item.id === id ? { ...item, qty: Math.max(1, qty) } : item));
+        set(() => ({
+          items,
+          ...buildLocalTotals(items),
+        }));
+        void get().syncServerCart();
+      },
+      clearCart: () => {
+        set(() => ({
+          items: [],
+          ...buildLocalTotals([]),
+        }));
+        if (useAuthStore.getState().user) {
+          set({ isServerSyncing: true });
+          void clearServerCart()
+            .then((cart) => get().setServerCart(cart))
+            .finally(() => set({ isServerSyncing: false }));
+        }
+      },
+      saveProduct: (product) => {
         set((state) => {
           if (state.saved.some((item) => item.id === product.id)) return state;
           return { saved: [...state.saved, toSavedProduct(product)] };
-        }),
+        });
+        const user = useAuthStore.getState().user;
+        if (user) {
+          get().claimOwnership(user._id);
+        }
+      },
       removeSaved: (id) => set((state) => ({ saved: state.saved.filter((item) => item.id !== id) })),
-      moveToSaved: (id) =>
+      moveToSaved: (id) => {
         set((state) => {
           const item = state.items.find((entry) => entry.id === id);
           if (!item) return state;
           const nextSaved = state.saved.some((entry) => entry.id === id)
             ? state.saved
             : [...state.saved, { id: item.id, title: item.title, image: item.image, price: item.price }];
+          const items = state.items.filter((entry) => entry.id !== id);
           return {
-            items: state.items.filter((entry) => entry.id !== id),
+            items,
             saved: nextSaved,
+            ...buildLocalTotals(items),
           };
-        }),
-      moveToCart: (id) =>
+        });
+        void get().syncServerCart();
+      },
+      moveToCart: (id) => {
         set((state) => {
           const savedItem = state.saved.find((entry) => entry.id === id);
           if (!savedItem) return state;
           const existing = state.items.find((entry) => entry.id === id);
+          const items = existing
+            ? state.items.map((entry) => (entry.id === id ? { ...entry, qty: entry.qty + 1 } : entry))
+            : [...state.items, { ...savedItem, qty: 1 }];
           return {
             saved: state.saved.filter((entry) => entry.id !== id),
-            items: existing
-              ? state.items.map((entry) => (entry.id === id ? { ...entry, qty: entry.qty + 1 } : entry))
-              : [...state.items, { ...savedItem, qty: 1 }],
+            items,
+            ...buildLocalTotals(items),
           };
+        });
+        void get().syncServerCart();
+      },
+      checkout: async (couponCode) => {
+        if (!useAuthStore.getState().user) {
+          throw new Error("Please sign in to complete checkout.");
+        }
+
+        set({ isServerSyncing: true });
+        try {
+          const order = await checkoutCart(couponCode);
+          set(() => ({
+            items: [],
+            subtotal: 0,
+            tax: 0,
+            total: 0,
+            itemCount: 0,
+            lastOrder: order,
+          }));
+          return order;
+        } finally {
+          set({ isServerSyncing: false });
+        }
+      },
+      clearLastOrder: () => set({ lastOrder: null }),
+      claimOwnership: (userId) => set({ ownerUserId: userId }),
+      resetAfterSignOut: () =>
+        set({
+          items: [],
+          saved: [],
+          ownerUserId: null,
+          subtotal: 0,
+          tax: 0,
+          total: 0,
+          itemCount: 0,
+          isServerSyncing: false,
+          lastOrder: null,
+        }),
+      resetForUserSwitch: (userId) =>
+        set({
+          items: [],
+          saved: [],
+          ownerUserId: userId,
+          subtotal: 0,
+          tax: 0,
+          total: 0,
+          itemCount: 0,
+          isServerSyncing: false,
+          lastOrder: null,
         }),
     }),
     {
       name: "frontend-cart-store",
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const totals = buildLocalTotals(state.items);
+        state.subtotal = totals.subtotal;
+        state.tax = totals.tax;
+        state.total = totals.total;
+        state.itemCount = totals.itemCount;
+      },
     }
   )
 );

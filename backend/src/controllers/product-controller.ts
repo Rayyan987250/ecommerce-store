@@ -1,20 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { sql } from "../config/db.js";
-
-type ProductFilters = {
-  search?: string;
-  category?: string;
-  brands: string[];
-  features: string[];
-  condition?: "new" | "refurbished" | "used";
-  minPrice?: number;
-  maxPrice?: number;
-  minRating?: number;
-  verifiedOnly?: boolean;
-  sort?: "featured" | "price-asc" | "price-desc" | "rating-desc" | "orders-desc";
-  page: number;
-  pageSize: number;
-};
+import type { CreateProductInput, GetProductsQueryInput, UpdateProductInput } from "../schemas/product-schemas.js";
 
 type ProductRow = {
   id: string;
@@ -39,35 +25,22 @@ type ProductRow = {
   specs: unknown;
 };
 
+type NormalizedProductRow = Omit<ProductRow, "features" | "images" | "specs"> & {
+  features: string[];
+  images: string[];
+  specs: Record<string, string>;
+};
+
+const selectProductFields = `
+  id::text AS id, title, slug, category, brand, features, condition, verified,
+  image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
+  short_description, description, specs
+`;
+
 function parseProductId(value: unknown): number | null {
   const parsed = Number.parseInt(String(value), 10);
   if (Number.isNaN(parsed) || parsed <= 0) return null;
   return parsed;
-}
-
-function toApiProduct(product: ProductRow) {
-  return {
-    id: product.id,
-    title: product.title,
-    slug: product.slug,
-    category: product.category,
-    brand: product.brand,
-    features: product.features ?? [],
-    condition: product.condition,
-    verified: product.verified,
-    image: product.image,
-    images: product.images ?? [],
-    price: Number(product.price),
-    originalPrice: product.original_price === null ? undefined : Number(product.original_price),
-    rating: Number(product.rating),
-    reviewCount: product.review_count,
-    orders: product.orders,
-    sold: product.sold,
-    freeShipping: product.free_shipping,
-    shortDescription: product.short_description,
-    description: product.description,
-    specs: product.specs ?? {},
-  };
 }
 
 function parseJsonArray(value: unknown): string[] {
@@ -101,7 +74,7 @@ function parseJsonRecord(value: unknown): Record<string, string> {
   return {};
 }
 
-function normalizeRow(row: ProductRow): ProductRow {
+function normalizeRow(row: ProductRow): NormalizedProductRow {
   return {
     ...row,
     features: parseJsonArray(row.features),
@@ -110,44 +83,58 @@ function normalizeRow(row: ProductRow): ProductRow {
   };
 }
 
+function toApiProduct(row: ProductRow | NormalizedProductRow) {
+  const product = "features" in row && Array.isArray(row.features) ? row : normalizeRow(row as ProductRow);
+  return {
+    id: product.id,
+    title: product.title,
+    slug: product.slug,
+    category: product.category,
+    brand: product.brand,
+    features: product.features,
+    condition: product.condition,
+    verified: product.verified,
+    image: product.image,
+    images: product.images,
+    price: Number(product.price),
+    originalPrice: product.original_price === null ? undefined : Number(product.original_price),
+    rating: Number(product.rating),
+    reviewCount: product.review_count,
+    orders: product.orders,
+    sold: product.sold,
+    freeShipping: product.free_shipping,
+    shortDescription: product.short_description,
+    description: product.description,
+    specs: product.specs,
+  };
+}
+
 export async function getProducts(req: Request, res: Response, next: NextFunction) {
   try {
-    const filters = req.query as Partial<ProductFilters>;
-    const brands = Array.isArray(filters.brands)
-      ? filters.brands
-      : typeof filters.brands === "string"
-        ? filters.brands.split(",").map((item) => item.trim()).filter(Boolean)
-        : [];
-    const features = Array.isArray(filters.features)
-      ? filters.features
-      : typeof filters.features === "string"
-        ? filters.features.split(",").map((item) => item.trim()).filter(Boolean)
-        : [];
-    const pageNumber = Number(filters.page) || 1;
-    const pageSize = Number(filters.pageSize) || 9;
-    const rows = await sql<ProductRow[]>`
-      SELECT
-        id::text AS id, title, slug, category, brand, features, condition, verified,
-        image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-        short_description, description, specs
-      FROM products
-    `;
+    const filters = req.query as unknown as GetProductsQueryInput;
+    const brands = filters.brands ?? [];
+    const features = filters.features ?? [];
+    const pageNumber = filters.page ?? 1;
+    const pageSize = filters.pageSize ?? 9;
+
+    const rows = await sql<ProductRow[]>`SELECT ${sql.unsafe(selectProductFields)} FROM products`;
     const allProducts = rows.map(normalizeRow);
 
     const search = filters.search?.trim().toLowerCase();
     let filtered = allProducts.filter((product) => {
       if (search) {
-        const haystack = `${product.title} ${product.brand} ${product.category} ${product.short_description}`.toLowerCase();
+        const haystack =
+          `${product.title} ${product.brand} ${product.category} ${product.short_description}`.toLowerCase();
         if (!haystack.includes(search)) return false;
       }
       if (filters.category && product.category !== filters.category) return false;
       if (brands.length > 0 && !brands.includes(product.brand)) return false;
-      if (features.length > 0 && !features.every((feature) => (product.features ?? []).includes(feature))) return false;
+      if (features.length > 0 && !features.every((feature) => product.features.includes(feature))) return false;
       if (filters.condition && product.condition !== filters.condition) return false;
       if (filters.verifiedOnly && !product.verified) return false;
-      if (filters.minRating && Number(product.rating) < filters.minRating) return false;
-      if (filters.minPrice && Number(product.price) < filters.minPrice) return false;
-      if (filters.maxPrice && Number(product.price) > filters.maxPrice) return false;
+      if (filters.minRating !== undefined && Number(product.rating) < filters.minRating) return false;
+      if (filters.minPrice !== undefined && Number(product.price) < filters.minPrice) return false;
+      if (filters.maxPrice !== undefined && Number(product.price) > filters.maxPrice) return false;
       return true;
     });
 
@@ -173,7 +160,7 @@ export async function getProducts(req: Request, res: Response, next: NextFunctio
     const paged = filtered.slice((safePage - 1) * pageSize, (safePage - 1) * pageSize + pageSize);
 
     const availableBrands = [...new Set(allProducts.map((item) => item.brand))].sort();
-    const availableFeatures = [...new Set(allProducts.flatMap((item) => item.features ?? []))].sort();
+    const availableFeatures = [...new Set(allProducts.flatMap((item) => item.features))].sort();
     const availableCategories = [...new Set(allProducts.map((item) => item.category))].sort();
 
     res.status(200).json({
@@ -201,10 +188,11 @@ export async function getRelatedProducts(req: Request, res: Response, next: Next
       res.status(400).json({ success: false, message: "Invalid product id" });
       return;
     }
+
     const products = await sql<{ id: string; category: string; brand: string }[]>`
       SELECT id::text AS id, category, brand
       FROM products
-      WHERE id = ${productId}
+      WHERE id = ${productId}::bigint
       LIMIT 1
     `;
     const product = products[0];
@@ -214,12 +202,9 @@ export async function getRelatedProducts(req: Request, res: Response, next: Next
     }
 
     const related = await sql<ProductRow[]>`
-      SELECT
-        id::text AS id, title, slug, category, brand, features, condition, verified,
-        image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-        short_description, description, specs
+      SELECT ${sql.unsafe(selectProductFields)}
       FROM products
-      WHERE id <> ${productId}
+      WHERE id <> ${productId}::bigint
       AND (category = ${product.category} OR brand = ${product.brand})
       ORDER BY rating DESC, orders DESC
       LIMIT 6
@@ -227,7 +212,7 @@ export async function getRelatedProducts(req: Request, res: Response, next: Next
 
     res.status(200).json({
       success: true,
-      data: related.map(normalizeRow).map(toApiProduct),
+      data: related.map(toApiProduct),
     });
   } catch (error) {
     next(error);
@@ -239,27 +224,21 @@ export async function getRecommendedProducts(req: Request, res: Response, next: 
     const excludeId = req.query.excludeId ? parseProductId(req.query.excludeId) : null;
     const items = excludeId
       ? await sql<ProductRow[]>`
-          SELECT
-            id::text AS id, title, slug, category, brand, features, condition, verified,
-            image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-            short_description, description, specs
+          SELECT ${sql.unsafe(selectProductFields)}
           FROM products
-          WHERE id <> ${excludeId}
+          WHERE id <> ${excludeId}::bigint
           ORDER BY rating DESC, orders DESC
           LIMIT 5
         `
       : await sql<ProductRow[]>`
-          SELECT
-            id::text AS id, title, slug, category, brand, features, condition, verified,
-            image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-            short_description, description, specs
+          SELECT ${sql.unsafe(selectProductFields)}
           FROM products
           ORDER BY rating DESC, orders DESC
           LIMIT 5
         `;
     res.status(200).json({
       success: true,
-      data: items.map(normalizeRow).map(toApiProduct),
+      data: items.map(toApiProduct),
     });
   } catch (error) {
     next(error);
@@ -274,12 +253,9 @@ export async function getProductById(req: Request, res: Response, next: NextFunc
       return;
     }
     const products = await sql<ProductRow[]>`
-      SELECT
-        id::text AS id, title, slug, category, brand, features, condition, verified,
-        image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-        short_description, description, specs
+      SELECT ${sql.unsafe(selectProductFields)}
       FROM products
-      WHERE id = ${productId}
+      WHERE id = ${productId}::bigint
       LIMIT 1
     `;
     const product = products[0];
@@ -289,7 +265,7 @@ export async function getProductById(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    res.status(200).json({ success: true, data: toApiProduct(normalizeRow(product)) });
+    res.status(200).json({ success: true, data: toApiProduct(product) });
   } catch (error) {
     next(error);
   }
@@ -297,27 +273,7 @@ export async function getProductById(req: Request, res: Response, next: NextFunc
 
 export async function createProduct(req: Request, res: Response, next: NextFunction) {
   try {
-    const payload = req.body as {
-      title: string;
-      slug: string;
-      category: string;
-      brand: string;
-      features: string[];
-      condition: "new" | "refurbished" | "used";
-      verified: boolean;
-      image: string;
-      images: string[];
-      price: number;
-      originalPrice?: number;
-      rating: number;
-      reviewCount: number;
-      orders: number;
-      sold: number;
-      freeShipping: boolean;
-      shortDescription: string;
-      description: string;
-      specs: Record<string, string>;
-    };
+    const payload = req.body as CreateProductInput;
     const rows = await sql<ProductRow[]>`
       INSERT INTO products (
         title, slug, category, brand, features, condition, verified, image, images,
@@ -344,10 +300,7 @@ export async function createProduct(req: Request, res: Response, next: NextFunct
         ${payload.description},
         ${JSON.stringify(payload.specs)}::jsonb
       )
-      RETURNING
-        id::text AS id, title, slug, category, brand, features, condition, verified,
-        image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-        short_description, description, specs
+      RETURNING ${sql.unsafe(selectProductFields)}
     `;
     const created = rows[0];
     if (!created) {
@@ -367,40 +320,17 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
       res.status(400).json({ success: false, message: "Invalid product id" });
       return;
     }
-    const payload = req.body as Partial<{
-      title: string;
-      slug: string;
-      category: string;
-      brand: string;
-      features: string[];
-      condition: "new" | "refurbished" | "used";
-      verified: boolean;
-      image: string;
-      images: string[];
-      price: number;
-      originalPrice?: number;
-      rating: number;
-      reviewCount: number;
-      orders: number;
-      sold: number;
-      freeShipping: boolean;
-      shortDescription: string;
-      description: string;
-      specs: Record<string, string>;
-    }>;
 
+    const payload = req.body as UpdateProductInput;
     if (Object.keys(payload).length === 0) {
       res.status(400).json({ success: false, message: "No update fields provided" });
       return;
     }
 
     const existingRows = await sql<ProductRow[]>`
-      SELECT
-        id::text AS id, title, slug, category, brand, features, condition, verified,
-        image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-        short_description, description, specs
+      SELECT ${sql.unsafe(selectProductFields)}
       FROM products
-      WHERE id = ${productId}
+      WHERE id = ${productId}::bigint
       LIMIT 1
     `;
     const existing = existingRows[0];
@@ -408,27 +338,28 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
       res.status(404).json({ success: false, message: "Product not found" });
       return;
     }
-    const base = normalizeRow(existing);
+
+    const current = toApiProduct(existing);
     const merged = {
-      title: payload.title ?? base.title,
-      slug: payload.slug ?? base.slug,
-      category: payload.category ?? base.category,
-      brand: payload.brand ?? base.brand,
-      features: payload.features ?? base.features ?? [],
-      condition: payload.condition ?? base.condition,
-      verified: payload.verified ?? base.verified,
-      image: payload.image ?? base.image,
-      images: payload.images ?? base.images ?? [],
-      price: payload.price ?? Number(base.price),
-      originalPrice: payload.originalPrice ?? (base.original_price === null ? null : Number(base.original_price)),
-      rating: payload.rating ?? Number(base.rating),
-      reviewCount: payload.reviewCount ?? base.review_count,
-      orders: payload.orders ?? base.orders,
-      sold: payload.sold ?? base.sold,
-      freeShipping: payload.freeShipping ?? base.free_shipping,
-      shortDescription: payload.shortDescription ?? base.short_description,
-      description: payload.description ?? base.description,
-      specs: payload.specs ?? base.specs ?? {},
+      title: payload.title ?? current.title,
+      slug: payload.slug ?? current.slug,
+      category: payload.category ?? current.category,
+      brand: payload.brand ?? current.brand,
+      features: payload.features ?? current.features,
+      condition: payload.condition ?? current.condition,
+      verified: payload.verified === undefined ? current.verified : payload.verified,
+      image: payload.image ?? current.image,
+      images: payload.images ?? current.images,
+      price: payload.price ?? current.price,
+      originalPrice: payload.originalPrice === undefined ? (current.originalPrice ?? null) : payload.originalPrice,
+      rating: payload.rating ?? current.rating,
+      reviewCount: payload.reviewCount ?? current.reviewCount,
+      orders: payload.orders ?? current.orders,
+      sold: payload.sold ?? current.sold,
+      freeShipping: payload.freeShipping === undefined ? current.freeShipping : payload.freeShipping,
+      shortDescription: payload.shortDescription ?? current.shortDescription,
+      description: payload.description ?? current.description,
+      specs: payload.specs ?? current.specs,
     };
 
     const rows = await sql<ProductRow[]>`
@@ -454,11 +385,8 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
         description = ${merged.description},
         specs = ${JSON.stringify(merged.specs)}::jsonb,
         updated_at = NOW()
-      WHERE id = ${productId}
-      RETURNING
-        id::text AS id, title, slug, category, brand, features, condition, verified,
-        image, images, price, original_price, rating, review_count, orders, sold, free_shipping,
-        short_description, description, specs
+      WHERE id = ${productId}::bigint
+      RETURNING ${sql.unsafe(selectProductFields)}
     `;
     const product = rows[0];
 
@@ -467,7 +395,7 @@ export async function updateProduct(req: Request, res: Response, next: NextFunct
       return;
     }
 
-    res.status(200).json({ success: true, data: toApiProduct(normalizeRow(product)) });
+    res.status(200).json({ success: true, data: toApiProduct(product) });
   } catch (error) {
     next(error);
   }
@@ -482,7 +410,7 @@ export async function deleteProduct(req: Request, res: Response, next: NextFunct
     }
     const deletedRows = await sql<{ id: string }[]>`
       DELETE FROM products
-      WHERE id = ${productId}
+      WHERE id = ${productId}::bigint
       RETURNING id::text AS id
     `;
     const product = deletedRows[0];

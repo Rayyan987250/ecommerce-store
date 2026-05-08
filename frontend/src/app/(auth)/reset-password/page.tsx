@@ -3,77 +3,201 @@
 import AuthField from "@/components/auth/auth-field";
 import AuthShell from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
+import {
+  useConfirmPasswordResetMutation,
+  useRequestPasswordResetMutation,
+} from "@/services/queries/auth";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function ResetPasswordPage() {
+type TouchedState = {
+  email: boolean;
+  password: boolean;
+  confirmPassword: boolean;
+};
+
+function ResetPasswordPageContent() {
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token")?.trim() ?? "";
+  const isConfirmMode = token.length > 0;
+
+  const requestMutation = useRequestPasswordResetMutation();
+  const confirmMutation = useConfirmPasswordResetMutation();
+
   const [email, setEmail] = useState("");
-  const [touched, setTouched] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [touched, setTouched] = useState<TouchedState>({
+    email: false,
+    password: false,
+    confirmPassword: false,
+  });
 
-  const error = useMemo(() => {
-    if (!touched) return "";
-    if (!email.trim()) return "Enter the email you use to sign in.";
-    if (!emailPattern.test(email.trim())) return "Enter a valid email address.";
-    return "";
-  }, [email, touched]);
+  const errors = useMemo(() => {
+    if (!isConfirmMode) {
+      return {
+        email: !touched.email
+          ? ""
+          : !email.trim()
+            ? "Enter the email you use to sign in."
+            : !emailPattern.test(email.trim())
+              ? "Enter a valid email address."
+              : "",
+        password: "",
+        confirmPassword: "",
+      };
+    }
 
-  const isValid = emailPattern.test(email.trim());
+    return {
+      email: "",
+      password: !touched.password
+        ? ""
+        : !password
+          ? "Enter your new password."
+          : password.length < 8
+            ? "Password must be at least 8 characters."
+            : "",
+      confirmPassword: !touched.confirmPassword
+        ? ""
+        : !confirmPassword
+          ? "Please confirm your new password."
+          : confirmPassword !== password
+            ? "Passwords do not match."
+            : "",
+    };
+  }, [confirmPassword, email, isConfirmMode, password, touched]);
+
+  const canSubmit = isConfirmMode
+    ? password.length >= 8 && confirmPassword === password
+    : emailPattern.test(email.trim());
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setTouched(true);
-    if (!isValid) return;
 
-    setIsSubmitting(true);
-    setIsSubmitted(false);
+    if (isConfirmMode) {
+      setTouched((current) => ({ ...current, password: true, confirmPassword: true }));
+      if (!canSubmit) return;
+      confirmMutation.mutate({ token, password });
+      return;
+    }
 
-    await new Promise((resolve) => window.setTimeout(resolve, 700));
-
-    setIsSubmitting(false);
-    setIsSubmitted(true);
+    setTouched((current) => ({ ...current, email: true }));
+    if (!canSubmit) return;
+    requestMutation.mutate(email.trim());
   };
+
+  const resetUrl = requestMutation.data?.data?.resetUrl;
 
   return (
     <AuthShell
-      title="Reset your password"
+      title={isConfirmMode ? "Create a new password" : "Reset your password"}
       alternateText="Remembered it?"
       alternateLabel="Sign in"
       alternateHref="/login"
     >
       <form onSubmit={onSubmit} className="space-y-4" noValidate>
-        <AuthField
-          id="reset-email"
-          label="Email"
-          type="email"
-          value={email}
-          onChange={(value) => {
-            setEmail(value);
-            setIsSubmitted(false);
-          }}
-          onBlur={() => setTouched(true)}
-          error={error}
-          isValid={touched && !error && isValid}
-          autoComplete="email"
-        />
+        {!isConfirmMode ? (
+          <AuthField
+            id="reset-email"
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(value) => {
+              setEmail(value);
+              requestMutation.reset();
+            }}
+            onBlur={() => setTouched((current) => ({ ...current, email: true }))}
+            error={errors.email}
+            isValid={touched.email && !errors.email && emailPattern.test(email.trim())}
+            autoComplete="email"
+          />
+        ) : (
+          <>
+            <AuthField
+              id="reset-password"
+              label="New password"
+              type="password"
+              value={password}
+              onChange={(value) => {
+                setPassword(value);
+                confirmMutation.reset();
+              }}
+              onBlur={() => setTouched((current) => ({ ...current, password: true }))}
+              error={errors.password}
+              isValid={touched.password && !errors.password && password.length >= 8}
+              autoComplete="new-password"
+            />
+            <AuthField
+              id="reset-confirm-password"
+              label="Confirm new password"
+              type="password"
+              value={confirmPassword}
+              onChange={(value) => {
+                setConfirmPassword(value);
+                confirmMutation.reset();
+              }}
+              onBlur={() => setTouched((current) => ({ ...current, confirmPassword: true }))}
+              error={errors.confirmPassword}
+              isValid={touched.confirmPassword && !errors.confirmPassword && confirmPassword === password && confirmPassword.length > 0}
+              autoComplete="new-password"
+            />
+          </>
+        )}
 
         <Button
           type="submit"
-          disabled={!isValid || isSubmitting}
+          disabled={!canSubmit || requestMutation.isPending || confirmMutation.isPending}
           className="h-12 w-full rounded-2xl border-[#127fff] bg-[#127fff] text-[15px] font-semibold text-white shadow-[0_12px_28px_rgba(18,127,255,0.20)] hover:bg-[#0f73e6]"
           icon={<ArrowRight className="h-3.5 w-3.5" />}
           iconPosition="right"
         >
-          {isSubmitting ? "Sending reset link..." : "Send reset link"}
+          {isConfirmMode
+            ? confirmMutation.isPending
+              ? "Updating password..."
+              : "Update password"
+            : requestMutation.isPending
+              ? "Generating reset link..."
+              : "Send reset link"}
         </Button>
 
-        {isSubmitted ? (
-          <p className="rounded-2xl border border-[#cce7d1] bg-[#f3fcf5] px-4 py-3 text-[13px] font-medium text-[#1e7b37]">
-            If an account exists for {email.trim()}, a reset link has been sent.
+        {requestMutation.data ? (
+          <div className="rounded-2xl border border-[#cce7d1] bg-[#f3fcf5] px-4 py-3 text-[13px] font-medium text-[#1e7b37]">
+            <p>{requestMutation.data.message}</p>
+            {resetUrl ? (
+              <p className="mt-2">
+                Demo reset link:{" "}
+                <Link href={resetUrl} className="text-[#127fff] underline">
+                  Open reset form
+                </Link>
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {confirmMutation.data ? (
+          <div className="rounded-2xl border border-[#cce7d1] bg-[#f3fcf5] px-4 py-3 text-[13px] font-medium text-[#1e7b37]">
+            <p>{confirmMutation.data.message}</p>
+            <p className="mt-2">
+              <Link href="/login" className="text-[#127fff] underline">
+                Continue to sign in
+              </Link>
+            </p>
+          </div>
+        ) : null}
+
+        {requestMutation.error ? (
+          <p className="rounded-2xl border border-[#ffd6d6] bg-[#fff5f5] px-4 py-3 text-[13px] font-medium text-[#d63b42]">
+            {requestMutation.error.message || "Reset request failed. Please try again."}
+          </p>
+        ) : null}
+
+        {confirmMutation.error ? (
+          <p className="rounded-2xl border border-[#ffd6d6] bg-[#fff5f5] px-4 py-3 text-[13px] font-medium text-[#d63b42]">
+            {confirmMutation.error.message || "Password reset failed. Please try again."}
           </p>
         ) : null}
       </form>
@@ -84,5 +208,13 @@ export default function ResetPasswordPage() {
         </Link>
       </div>
     </AuthShell>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f7fafc]" />}>
+      <ResetPasswordPageContent />
+    </Suspense>
   );
 }

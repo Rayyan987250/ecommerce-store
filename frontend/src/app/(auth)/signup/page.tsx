@@ -6,10 +6,19 @@ import { useAuthForm } from "@/components/auth/use-auth-form";
 import { Button } from "@/components/ui/button";
 import { useSignupMutation } from "@/services/queries/auth";
 import { ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 export default function SignupPage() {
   const mutation = useSignupMutation();
   const form = useAuthForm("signup");
+  const router = useRouter();
+
+  useEffect(() => {
+    if (mutation.data?.data) {
+      router.replace("/");
+    }
+  }, [mutation.data, router]);
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
