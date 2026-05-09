@@ -21,6 +21,14 @@ export async function syncCart(items: CartMutationItem[]) {
   return response.data as CartServerState;
 }
 
+export async function mergeCart(items: CartMutationItem[]) {
+  const response = await apiRequest<CartServerState>("/cart/merge", {
+    method: "POST",
+    body: JSON.stringify({ items: toPayload(items) }),
+  });
+  return response.data as CartServerState;
+}
+
 export async function clearServerCart() {
   const response = await apiRequest<CartServerState>("/cart", {
     method: "DELETE",

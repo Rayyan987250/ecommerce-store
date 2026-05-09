@@ -148,7 +148,7 @@ export default function AdminProductsPage() {
 
   const productsQuery = useQuery({
     queryKey: productsQueryKey,
-    queryFn: () => getProducts({ page: 1, pageSize: 200, sort: "featured" }),
+    queryFn: () => getProducts({ page: 1, pageSize: 100, sort: "featured" }),
   });
 
   const sortedProducts = useMemo(

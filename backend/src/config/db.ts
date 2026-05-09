@@ -459,6 +459,15 @@ export async function connectDB() {
 
 export async function initializeSchemaAndSeed() {
   await sql`
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+
+  await sql`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -569,6 +578,20 @@ export async function initializeSchemaAndSeed() {
   await sql`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at)`;
 
+  if (process.env.ENABLE_DEMO_SEED !== "true") {
+    return;
+  }
+
+  const existingSeedMarker = await sql<{ key: string }[]>`
+    SELECT key
+    FROM app_meta
+    WHERE key = 'demo_seed_v1_completed'
+    LIMIT 1
+  `;
+  if (existingSeedMarker.length > 0) {
+    return;
+  }
+
   const adminEmail = requireEnv("SEED_ADMIN_EMAIL");
   const adminPassword = requireEnv("SEED_ADMIN_PASSWORD");
   if (adminPassword === "Admin@12345") {
@@ -578,11 +601,7 @@ export async function initializeSchemaAndSeed() {
   await sql`
     INSERT INTO users (name, email, password_hash, is_admin)
     VALUES ('Demo Admin', ${adminEmail}, ${hashedPassword}, TRUE)
-    ON CONFLICT (email) DO UPDATE SET
-      name = EXCLUDED.name,
-      password_hash = EXCLUDED.password_hash,
-      is_admin = TRUE,
-      updated_at = NOW()
+    ON CONFLICT (email) DO NOTHING
   `;
 
   for (const product of seedProducts) {
@@ -612,28 +631,18 @@ export async function initializeSchemaAndSeed() {
         ${product.description},
         ${JSON.stringify(product.specs)}::jsonb
       )
-      ON CONFLICT (slug) DO UPDATE SET
-        title = EXCLUDED.title,
-        category = EXCLUDED.category,
-        brand = EXCLUDED.brand,
-        features = EXCLUDED.features,
-        condition = EXCLUDED.condition,
-        verified = EXCLUDED.verified,
-        image = EXCLUDED.image,
-        images = EXCLUDED.images,
-        price = EXCLUDED.price,
-        original_price = EXCLUDED.original_price,
-        rating = EXCLUDED.rating,
-        review_count = EXCLUDED.review_count,
-        orders = EXCLUDED.orders,
-        sold = EXCLUDED.sold,
-        free_shipping = EXCLUDED.free_shipping,
-        short_description = EXCLUDED.short_description,
-        description = EXCLUDED.description,
-        specs = EXCLUDED.specs,
-        updated_at = NOW()
+      ON CONFLICT (slug) DO NOTHING
     `;
   }
+
+  await sql`
+    INSERT INTO app_meta (key, value)
+    VALUES (
+      'demo_seed_v1_completed',
+      ${JSON.stringify({ seededAt: new Date().toISOString() })}::jsonb
+    )
+    ON CONFLICT (key) DO NOTHING
+  `;
 }
 
 export default connectDB;

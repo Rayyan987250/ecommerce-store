@@ -10,7 +10,9 @@ import {
   clearCartForUser,
   getCartState,
   getOrCreateCartId,
+  MAX_CART_QTY,
   normalizeCartItems,
+  loadCartItems,
 } from "../utils/cart-utils.js";
 
 function parseProductId(value: unknown) {
@@ -52,6 +54,50 @@ export async function syncCart(req: Request, res: Response, next: NextFunction) 
       await tx`DELETE FROM cart_items WHERE cart_id = ${cartId}::bigint`;
 
       for (const item of items) {
+        await tx`
+          INSERT INTO cart_items (cart_id, product_id, quantity)
+          VALUES (${cartId}::bigint, ${item.productId}::bigint, ${item.qty})
+        `;
+      }
+
+      await tx`
+        UPDATE carts
+        SET updated_at = NOW()
+        WHERE id = ${cartId}::bigint
+      `;
+
+      return getCartState(userId, db);
+    });
+
+    res.status(200).json({ success: true, data: cart });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function mergeCart(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = requireUserId(req);
+    const payload = req.body as CartSyncInput;
+    const incomingItems = normalizeCartItems(payload.items);
+
+    const cart = await sql.begin(async (tx) => {
+      const db = tx as unknown as typeof sql;
+      const cartId = await getOrCreateCartId(userId, db);
+      await assertProductsExist(incomingItems, db);
+
+      const existingItems = await loadCartItems(userId, db);
+      const mergedItems = normalizeCartItems([
+        ...existingItems.map((item) => ({
+          productId: Number(item.productId),
+          qty: Math.min(item.qty, MAX_CART_QTY),
+        })),
+        ...incomingItems,
+      ]);
+
+      await tx`DELETE FROM cart_items WHERE cart_id = ${cartId}::bigint`;
+
+      for (const item of mergedItems) {
         await tx`
           INSERT INTO cart_items (cart_id, product_id, quantity)
           VALUES (${cartId}::bigint, ${item.productId}::bigint, ${item.qty})

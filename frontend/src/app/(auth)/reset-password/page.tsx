@@ -90,8 +90,6 @@ function ResetPasswordPageContent() {
     requestMutation.mutate(email.trim());
   };
 
-  const resetUrl = requestMutation.data?.data?.resetUrl;
-
   return (
     <AuthShell
       title={isConfirmMode ? "Create a new password" : "Reset your password"}
@@ -167,14 +165,7 @@ function ResetPasswordPageContent() {
         {requestMutation.data ? (
           <div className="rounded-2xl border border-[#cce7d1] bg-[#f3fcf5] px-4 py-3 text-[13px] font-medium text-[#1e7b37]">
             <p>{requestMutation.data.message}</p>
-            {resetUrl ? (
-              <p className="mt-2">
-                Demo reset link:{" "}
-                <Link href={resetUrl} className="text-[#127fff] underline">
-                  Open reset form
-                </Link>
-              </p>
-            ) : null}
+            <p className="mt-2 text-[#5f6f84]">If email delivery is configured, the reset instructions will be sent there.</p>
           </div>
         ) : null}
 

@@ -15,6 +15,9 @@ export default function SupplierInquirySection() {
 
         <form className="rounded-md border border-[#e3e6eb] bg-white p-4 shadow-lg transition-all duration-200 hover:shadow-xl sm:p-6">
           <h4 className="mb-4 text-[22px] font-semibold text-[#1c1c1c] sm:text-[26px]">Send quote to suppliers</h4>
+          <p className="mb-4 rounded-md border border-[#ffe3a3] bg-[#fff7db] px-3 py-2 text-sm text-[#7a5b00]">
+            Inquiry submission is not enabled in this demo build yet. Please contact sales directly for quote requests.
+          </p>
 
           <label htmlFor="item-name" className="sr-only">
             Item name
@@ -62,9 +65,11 @@ export default function SupplierInquirySection() {
 
           <button
             type="button"
+            disabled
+            aria-disabled="true"
             className="rounded-md bg-gradient-to-b from-[#2f8ef6] to-[#0d6efd] px-5 py-2 text-[20px] font-medium text-white transition-all duration-150 hover:-translate-y-[1px] hover:from-[#2a86ee] hover:to-[#0b63d8] hover:shadow-sm"
           >
-            Send inquiry
+            Demo only
           </button>
         </form>
       </div>

@@ -31,6 +31,7 @@ export default function CartPage() {
   const removeSaved = useCartStore((state) => state.removeSaved);
   const checkout = useCartStore((state) => state.checkout);
   const isServerSyncing = useCartStore((state) => state.isServerSyncing);
+  const syncError = useCartStore((state) => state.syncError);
   const lastOrder = useCartStore((state) => state.lastOrder);
   const clearLastOrder = useCartStore((state) => state.clearLastOrder);
   const [couponDraft, setCouponDraft] = useState("");
@@ -75,6 +76,12 @@ export default function CartPage() {
   return (
     <section className="space-y-5">
       <h1 className="text-[30px] font-semibold text-[#1c1c1c]">My cart ({items.length})</h1>
+
+      {syncError ? (
+        <div className="rounded-md border border-[#ffd6d6] bg-white px-4 py-3 text-[14px] text-[#d63b42]">
+          {syncError}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
         <div className="rounded-md border border-[#e3e6eb] bg-white p-3">

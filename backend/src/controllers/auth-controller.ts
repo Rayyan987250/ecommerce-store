@@ -30,6 +30,10 @@ function getPrimaryFrontendUrl() {
     .find(Boolean) || "http://localhost:3000";
 }
 
+function shouldLogPasswordResetLink() {
+  return process.env.NODE_ENV !== "production" && process.env.ENABLE_PASSWORD_RESET_DEBUG_LOG === "true";
+}
+
 export async function register(req: Request, res: Response, next: NextFunction) {
   try {
     const { name, email, password } = req.body as {
@@ -206,8 +210,6 @@ export async function requestPasswordReset(req: Request, res: Response, next: Ne
       LIMIT 1
     `;
     const user = users[0];
-    let resetUrl: string | undefined;
-
     if (user) {
       const token = randomBytes(32).toString("hex");
       const tokenHash = hashResetToken(token);
@@ -221,13 +223,15 @@ export async function requestPasswordReset(req: Request, res: Response, next: Ne
       });
 
       const frontendUrl = getPrimaryFrontendUrl().replace(/\/$/, "");
-      resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
+      const resetUrl = `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
+      if (shouldLogPasswordResetLink()) {
+        console.info(`[password-reset] ${email}: ${resetUrl}`);
+      }
     }
 
     res.status(200).json({
       success: true,
       message: "If an account exists for that email, a reset link has been generated.",
-      ...(resetUrl ? { data: { resetUrl } } : {}),
     });
   } catch (error) {
     next(error);
@@ -296,10 +300,12 @@ export function logout(_req: Request, res: Response) {
 
 export function getCsrfToken(_req: Request, res: Response) {
   const csrfToken = generateCsrfToken();
+  const secure = process.env.COOKIE_SECURE?.trim().toLowerCase() === "true" || process.env.NODE_ENV === "production";
+  const sameSite = (process.env.COOKIE_SAME_SITE?.trim().toLowerCase() || "lax") as "lax" | "strict" | "none";
   res.cookie("csrf_token", csrfToken, {
     httpOnly: false,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+    secure: sameSite === "none" ? true : secure,
+    sameSite,
     path: "/",
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });

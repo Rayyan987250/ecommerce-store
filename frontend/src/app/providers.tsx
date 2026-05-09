@@ -28,13 +28,9 @@ function AuthBootstrap() {
 
   useEffect(() => {
     if (sessionQuery.isError) {
-      clearUser();
-      if (useCartStore.getState().ownerUserId) {
-        useCartStore.getState().resetAfterSignOut();
-      }
       setInitialized(true);
     }
-  }, [clearUser, sessionQuery.isError, setInitialized]);
+  }, [sessionQuery.isError, setInitialized]);
 
   return null;
 }
@@ -43,7 +39,6 @@ function CartBootstrap() {
   const user = useAuthStore((state) => state.user);
   const initialized = useAuthStore((state) => state.initialized);
   const loadServerCart = useCartStore((state) => state.loadServerCart);
-  const syncServerCart = useCartStore((state) => state.syncServerCart);
   const claimOwnership = useCartStore((state) => state.claimOwnership);
   const ownerUserId = useCartStore((state) => state.ownerUserId);
   const resetForUserSwitch = useCartStore((state) => state.resetForUserSwitch);
@@ -70,10 +65,13 @@ function CartBootstrap() {
       return;
     }
 
-    if (itemCount > 0) {
-      void syncServerCart().catch(() => {
-        void loadServerCart();
-      });
+    if (!ownerUserId && itemCount > 0) {
+      void useCartStore
+        .getState()
+        .mergeServerCart()
+        .catch(() => {
+          void loadServerCart();
+        });
       return;
     }
 
@@ -82,7 +80,7 @@ function CartBootstrap() {
     }
 
     void loadServerCart();
-  }, [claimOwnership, initialized, itemCount, loadServerCart, ownerUserId, resetForUserSwitch, syncServerCart, user]);
+  }, [claimOwnership, initialized, itemCount, loadServerCart, ownerUserId, resetForUserSwitch, user]);
 
   return null;
 }

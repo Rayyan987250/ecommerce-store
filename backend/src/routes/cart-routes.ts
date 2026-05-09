@@ -3,6 +3,7 @@ import {
   addCartItem,
   clearCart,
   getCart,
+  mergeCart,
   removeCartItem,
   syncCart,
   updateCartItem,
@@ -18,6 +19,7 @@ const cartLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 120, keyP
 router.use(cartLimiter, protect);
 
 router.get("/", getCart);
+router.post("/merge", validateBody(cartSyncSchema), mergeCart);
 router.put("/sync", validateBody(cartSyncSchema), syncCart);
 router.post("/items", validateBody(cartItemMutationSchema), addCartItem);
 router.put("/items/:productId", validateBody(cartQtyUpdateSchema), updateCartItem);

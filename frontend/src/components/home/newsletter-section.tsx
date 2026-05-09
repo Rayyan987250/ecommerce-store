@@ -14,7 +14,7 @@ export default function NewsletterSection() {
       showToast("Enter an email address to subscribe.");
       return;
     }
-    showToast(`Subscribed ${email} to product updates.`);
+    showToast(`Newsletter signup is not enabled in this demo yet. Saved address: ${email}`);
     setEmail("");
   };
 
@@ -25,6 +25,9 @@ export default function NewsletterSection() {
       </h3>
       <p className="mt-1 text-[15px] text-[#505050] sm:text-[18px]">
         Get daily news on upcoming offers from many suppliers all over the world
+      </p>
+      <p className="mt-3 text-[14px] text-[#7a5b00]">
+        Demo note: this form does not send data to a backend mailing service yet.
       </p>
 
       <form onSubmit={onSubmit} className="mx-auto mt-4 flex max-w-[520px] flex-col gap-2 sm:flex-row">

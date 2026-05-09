@@ -1,6 +1,7 @@
 import { sql } from "../config/db.js";
 
 export const TAX_RATE = 0.05;
+export const MAX_CART_QTY = 99;
 
 export type CartApiItem = {
   productId: string;
@@ -55,7 +56,8 @@ export function buildCartState(items: CartApiItem[]): CartState {
 export function normalizeCartItems(items: CartMutationItem[]) {
   const merged = new Map<number, number>();
   for (const item of items) {
-    merged.set(item.productId, (merged.get(item.productId) ?? 0) + item.qty);
+    const nextQty = (merged.get(item.productId) ?? 0) + item.qty;
+    merged.set(item.productId, Math.min(MAX_CART_QTY, nextQty));
   }
   return [...merged.entries()]
     .map(([productId, qty]) => ({ productId, qty }))

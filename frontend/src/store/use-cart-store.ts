@@ -1,6 +1,6 @@
 "use client";
 
-import { checkoutCart, clearServerCart, getCart, syncCart } from "@/services/cart";
+import { checkoutCart, clearServerCart, getCart, mergeCart, syncCart } from "@/services/cart";
 import { useAuthStore } from "@/store/use-auth-store";
 import type { CartLineItem, CartMutationItem, CartServerState, Order, Product, SavedProduct } from "@/types";
 import { create } from "zustand";
@@ -15,10 +15,12 @@ type CartState = {
   total: number;
   itemCount: number;
   isServerSyncing: boolean;
+  syncError: string | null;
   lastOrder: Order | null;
   setServerCart: (cart: CartServerState) => void;
   loadServerCart: () => Promise<void>;
   syncServerCart: () => Promise<void>;
+  mergeServerCart: () => Promise<void>;
   isSaved: (id: string) => boolean;
   addItem: (product: Product, qty?: number) => void;
   removeItem: (id: string) => void;
@@ -35,12 +37,30 @@ type CartState = {
   resetForUserSwitch: (userId: string) => void;
 };
 
+const MAX_CART_QTY = 99;
+
+let cartMutationQueue: Promise<void> = Promise.resolve();
+
+function clampQty(value: number) {
+  return Math.min(Math.max(Math.trunc(value) || 1, 1), MAX_CART_QTY);
+}
+
+function enqueueCartMutation(task: () => Promise<void>) {
+  const next = cartMutationQueue.then(task, task);
+  cartMutationQueue = next.catch(() => undefined);
+  return next;
+}
+
+async function waitForCartQueue() {
+  await cartMutationQueue.catch(() => undefined);
+}
+
 function toSavedProduct(product: Pick<Product, "id" | "title" | "image" | "price">): SavedProduct {
   return { id: product.id, title: product.title, image: product.image, price: product.price };
 }
 
 function toServerPayload(items: CartLineItem[]): CartMutationItem[] {
-  return items.map((item) => ({ productId: item.id, qty: item.qty }));
+  return items.map((item) => ({ productId: item.id, qty: clampQty(item.qty) }));
 }
 
 function buildLocalTotals(items: CartLineItem[]) {
@@ -68,6 +88,7 @@ export const useCartStore = create<CartState>()(
       total: 0,
       itemCount: 0,
       isServerSyncing: false,
+      syncError: null,
       lastOrder: null,
       setServerCart: (cart) =>
         set(() => ({
@@ -82,6 +103,7 @@ export const useCartStore = create<CartState>()(
           tax: cart.tax,
           total: cart.total,
           itemCount: cart.itemCount,
+          syncError: null,
         })),
       loadServerCart: async () => {
         const user = useAuthStore.getState().user;
@@ -91,6 +113,9 @@ export const useCartStore = create<CartState>()(
           const cart = await getCart();
           get().setServerCart(cart);
           set({ ownerUserId: user._id });
+        } catch (error) {
+          set({ syncError: error instanceof Error ? error.message : "Cart could not be loaded." });
+          throw error;
         } finally {
           set({ isServerSyncing: false });
         }
@@ -105,6 +130,24 @@ export const useCartStore = create<CartState>()(
             get().setServerCart(cart);
             set({ ownerUserId: user._id });
           }
+        } catch (error) {
+          set({ syncError: error instanceof Error ? error.message : "Cart could not be synced." });
+          throw error;
+        } finally {
+          set({ isServerSyncing: false });
+        }
+      },
+      mergeServerCart: async () => {
+        const user = useAuthStore.getState().user;
+        if (!user) return;
+        set({ isServerSyncing: true });
+        try {
+          const cart = await mergeCart(toServerPayload(get().items));
+          get().setServerCart(cart);
+          set({ ownerUserId: user._id });
+        } catch (error) {
+          set({ syncError: error instanceof Error ? error.message : "Cart could not be merged." });
+          throw error;
         } finally {
           set({ isServerSyncing: false });
         }
@@ -113,66 +156,90 @@ export const useCartStore = create<CartState>()(
       addItem: (product, qty = 1) => {
         set((state) => {
           const existing = state.items.find((item) => item.id === product.id);
+          const nextQty = clampQty((existing?.qty ?? 0) + qty);
           const items = existing
             ? state.items.map((item) =>
-                item.id === product.id ? { ...item, qty: item.qty + qty } : item
+                item.id === product.id ? { ...item, qty: nextQty } : item
               )
             : [
                 ...state.items,
-                { id: product.id, title: product.title, image: product.image, price: product.price, qty },
+                { id: product.id, title: product.title, image: product.image, price: product.price, qty: clampQty(qty) },
               ];
 
           return {
             items,
             saved: state.saved.filter((item) => item.id !== product.id),
             ...buildLocalTotals(items),
+            syncError: null,
           };
         });
         const user = useAuthStore.getState().user;
         if (user) {
           get().claimOwnership(user._id);
         }
-        void get().syncServerCart();
+        if (user) {
+          void enqueueCartMutation(async () => {
+            await get().syncServerCart();
+          });
+        }
       },
       removeItem: (id) => {
         const items = get().items.filter((item) => item.id !== id);
         set(() => ({
           items,
           ...buildLocalTotals(items),
+          syncError: null,
         }));
-        void get().syncServerCart();
+        if (useAuthStore.getState().user) {
+          void enqueueCartMutation(async () => {
+            await get().syncServerCart();
+          });
+        }
       },
       updateQty: (id, qty) => {
-        const items = get().items.map((item) => (item.id === id ? { ...item, qty: Math.max(1, qty) } : item));
+        const items = get().items.map((item) => (item.id === id ? { ...item, qty: clampQty(qty) } : item));
         set(() => ({
           items,
           ...buildLocalTotals(items),
+          syncError: null,
         }));
-        void get().syncServerCart();
+        if (useAuthStore.getState().user) {
+          void enqueueCartMutation(async () => {
+            await get().syncServerCart();
+          });
+        }
       },
       clearCart: () => {
         set(() => ({
           items: [],
           ...buildLocalTotals([]),
+          syncError: null,
         }));
         if (useAuthStore.getState().user) {
-          set({ isServerSyncing: true });
-          void clearServerCart()
-            .then((cart) => get().setServerCart(cart))
-            .finally(() => set({ isServerSyncing: false }));
+          void enqueueCartMutation(async () => {
+            set({ isServerSyncing: true });
+            try {
+              const cart = await clearServerCart();
+              get().setServerCart(cart);
+            } catch (error) {
+              set({ syncError: error instanceof Error ? error.message : "Cart could not be cleared." });
+            } finally {
+              set({ isServerSyncing: false });
+            }
+          });
         }
       },
       saveProduct: (product) => {
         set((state) => {
           if (state.saved.some((item) => item.id === product.id)) return state;
-          return { saved: [...state.saved, toSavedProduct(product)] };
+          return { saved: [...state.saved, toSavedProduct(product)], syncError: null };
         });
         const user = useAuthStore.getState().user;
         if (user) {
           get().claimOwnership(user._id);
         }
       },
-      removeSaved: (id) => set((state) => ({ saved: state.saved.filter((item) => item.id !== id) })),
+      removeSaved: (id) => set((state) => ({ saved: state.saved.filter((item) => item.id !== id), syncError: null })),
       moveToSaved: (id) => {
         set((state) => {
           const item = state.items.find((entry) => entry.id === id);
@@ -185,25 +252,36 @@ export const useCartStore = create<CartState>()(
             items,
             saved: nextSaved,
             ...buildLocalTotals(items),
+            syncError: null,
           };
         });
-        void get().syncServerCart();
+        if (useAuthStore.getState().user) {
+          void enqueueCartMutation(async () => {
+            await get().syncServerCart();
+          });
+        }
       },
       moveToCart: (id) => {
         set((state) => {
           const savedItem = state.saved.find((entry) => entry.id === id);
           if (!savedItem) return state;
           const existing = state.items.find((entry) => entry.id === id);
+          const nextQty = clampQty((existing?.qty ?? 0) + 1);
           const items = existing
-            ? state.items.map((entry) => (entry.id === id ? { ...entry, qty: entry.qty + 1 } : entry))
+            ? state.items.map((entry) => (entry.id === id ? { ...entry, qty: nextQty } : entry))
             : [...state.items, { ...savedItem, qty: 1 }];
           return {
             saved: state.saved.filter((entry) => entry.id !== id),
             items,
             ...buildLocalTotals(items),
+            syncError: null,
           };
         });
-        void get().syncServerCart();
+        if (useAuthStore.getState().user) {
+          void enqueueCartMutation(async () => {
+            await get().syncServerCart();
+          });
+        }
       },
       checkout: async (couponCode) => {
         if (!useAuthStore.getState().user) {
@@ -212,6 +290,7 @@ export const useCartStore = create<CartState>()(
 
         set({ isServerSyncing: true });
         try {
+          await waitForCartQueue();
           const order = await checkoutCart(couponCode);
           set(() => ({
             items: [],
@@ -219,9 +298,13 @@ export const useCartStore = create<CartState>()(
             tax: 0,
             total: 0,
             itemCount: 0,
+            syncError: null,
             lastOrder: order,
           }));
           return order;
+        } catch (error) {
+          set({ syncError: error instanceof Error ? error.message : "Checkout failed." });
+          throw error;
         } finally {
           set({ isServerSyncing: false });
         }
@@ -238,6 +321,7 @@ export const useCartStore = create<CartState>()(
           total: 0,
           itemCount: 0,
           isServerSyncing: false,
+          syncError: null,
           lastOrder: null,
         }),
       resetForUserSwitch: (userId) =>
@@ -250,6 +334,7 @@ export const useCartStore = create<CartState>()(
           total: 0,
           itemCount: 0,
           isServerSyncing: false,
+          syncError: null,
           lastOrder: null,
         }),
     }),

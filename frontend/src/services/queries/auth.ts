@@ -1,6 +1,6 @@
 "use client";
 
-import { apiRequest } from "@/services/http";
+import { ApiError, apiRequest } from "@/services/http";
 import { useAuthStore } from "@/store/use-auth-store";
 import { useCartStore } from "@/store/use-cart-store";
 import type { AuthUser } from "@/types";
@@ -27,9 +27,6 @@ type LogoutResponse = {
 type PasswordResetRequestResponse = {
   success: boolean;
   message: string;
-  data?: {
-    resetUrl?: string;
-  };
 };
 
 type PasswordResetConfirmResponse = {
@@ -52,8 +49,7 @@ export async function getOptionalProfile() {
   try {
     return await getProfile();
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    if (message.includes("Not authorized") || message.includes("Not authorized to access this route")) {
+    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
       return null;
     }
     throw error;

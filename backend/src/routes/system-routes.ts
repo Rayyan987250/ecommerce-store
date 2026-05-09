@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { sql } from "../config/db.js";
+import { admin, protect } from "../middleware/auth-middleware.js";
 
 const router = Router();
 
-router.get("/status", async (req, res, next) => {
+router.get("/status", protect, admin, async (req, res, next) => {
   try {
     const [dbCheck, usersCount, productsCount, cartsCount, ordersCount] = await Promise.all([
       sql<{ now: string }[]>`SELECT NOW()::text AS now`,

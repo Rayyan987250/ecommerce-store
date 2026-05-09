@@ -1,45 +1,46 @@
-# E-Commerce Backend API (Neon Postgres)
+# E-Commerce Backend API
 
-Express + TypeScript backend using Neon PostgreSQL.
+Express + TypeScript backend using PostgreSQL.
 
-## One-time setup
+## Setup
 
 1. Install dependencies:
 ```bash
 npm install
 ```
-2. Set the required variables in `backend/.env`:
-```bash
-NEON_DATABASE_URL=postgresql://<user>:<password>@<host>/<db>?sslmode=require
-SEED_ADMIN_EMAIL=admin@example.com
-SEED_ADMIN_PASSWORD=ChooseAStrongPassword
-```
-3. Start server:
+2. Copy `backend/.env.example` to `backend/.env`.
+3. Fill in the database URL and strong JWT secrets.
+4. Start the API:
 ```bash
 npm run dev
 ```
 
-On startup, the app automatically:
-- connects to Neon
-- creates required tables if missing
-- creates a demo admin user if missing
-- seeds starter products if products table is empty
+## Security notes
+
+- The server now requires strong `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values at startup.
+- Password reset requests return the same response for existing and unknown emails.
+- Reset links are only logged when `ENABLE_PASSWORD_RESET_DEBUG_LOG=true` in non-production development.
+- The admin/system status endpoint is protected by authentication and admin authorization.
+- Demo seed data is disabled by default and only runs once per database when `ENABLE_DEMO_SEED=true`.
 
 ## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `NEON_DATABASE_URL` | Yes | Neon connection URL |
+| `NEON_DATABASE_URL` or `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `PORT` | No | API port (default `5000`) |
 | `NODE_ENV` | No | `development` / `production` / `test` |
 | `FRONTEND_URL` | No | Comma-separated allowed origins for CORS |
-| `JWT_SECRET` | No | Fallback JWT secret |
-| `JWT_ACCESS_SECRET` | No | Access token secret |
-| `JWT_REFRESH_SECRET` | No | Refresh token secret |
+| `JWT_ACCESS_SECRET` | Yes | Access token secret, at least 32 characters |
+| `JWT_REFRESH_SECRET` | Yes | Refresh token secret, at least 32 characters |
 | `JWT_ACCESS_EXPIRE` | No | Access token expiry (`15m`) |
 | `JWT_REFRESH_EXPIRE` | No | Refresh token expiry (`7d`) |
-| `SEED_ADMIN_EMAIL` | Yes | Initial admin email used for seeded admin login |
-| `SEED_ADMIN_PASSWORD` | Yes | Initial admin password used for seeded admin login |
+| `COOKIE_SAME_SITE` | No | `strict`, `lax`, or `none` |
+| `COOKIE_SECURE` | No | Force secure cookies (`true` / `false`) |
+| `ENABLE_DEMO_SEED` | No | Enables one-time demo seeding when `true` |
+| `SEED_ADMIN_EMAIL` | When seeding | Initial admin email for demo seed |
+| `SEED_ADMIN_PASSWORD` | When seeding | Initial admin password for demo seed |
+| `ENABLE_PASSWORD_RESET_DEBUG_LOG` | No | Logs reset links in local development only |
 
 ## Available endpoints
 
