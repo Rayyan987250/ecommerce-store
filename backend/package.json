@@ -4,6 +4,9 @@
   "description": "E-commerce backend API with Express, Neon Postgres, and TypeScript",
   "main": "dist/index.js",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "nodemon --exec tsx src/index.ts",
     "build": "tsc",

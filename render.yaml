@@ -1,0 +1,59 @@
+services:
+  # ── Backend API ────────────────────────────────────────────────────────────
+  - type: web
+    name: ecommerce-store-api
+    runtime: node
+    region: ohio
+    rootDir: backend
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "5000"
+      # Set FRONTEND_URL to your deployed frontend URL (comma-separate multiple)
+      - key: FRONTEND_URL
+        sync: false
+      # Neon PostgreSQL connection strings
+      - key: NEON_DATABASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      # JWT secrets — use Render's "Generate" button or paste strong random values
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_ACCESS_EXPIRE
+        value: 15m
+      - key: JWT_REFRESH_EXPIRE
+        value: 7d
+      # Production cookie settings — required for cross-domain auth
+      - key: COOKIE_SAME_SITE
+        value: none
+      - key: COOKIE_SECURE
+        value: "true"
+      # Seed on first deploy — remove these after the DB is seeded
+      - key: ENABLE_DEMO_SEED
+        value: "true"
+      - key: SEED_ADMIN_EMAIL
+        sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: ENABLE_PASSWORD_RESET_DEBUG_LOG
+        value: "false"
+
+  # ── Frontend (Next.js SSR) ─────────────────────────────────────────────────
+  - type: web
+    name: ecommerce-store
+    runtime: node
+    region: ohio
+    rootDir: frontend
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      # Set to your deployed backend URL, e.g. https://ecommerce-store-api.onrender.com/api
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
