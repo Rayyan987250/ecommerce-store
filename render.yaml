@@ -13,9 +13,8 @@ services:
         value: production
       - key: PORT
         value: "5000"
-      # Set FRONTEND_URL to your deployed frontend URL (comma-separate multiple)
       - key: FRONTEND_URL
-        sync: false
+        value: https://ecommerce-store-frontend-uzfs.onrender.com
       # Neon PostgreSQL connection strings
       - key: NEON_DATABASE_URL
         sync: false
@@ -54,6 +53,5 @@ services:
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     envVars:
-      # Set to your deployed backend URL, e.g. https://ecommerce-store-api.onrender.com/api
       - key: NEXT_PUBLIC_API_URL
-        sync: false
+        value: https://ecommerce-store-90ng.onrender.com/api
